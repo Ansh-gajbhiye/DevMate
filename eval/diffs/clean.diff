@@ -1,0 +1,9 @@
+diff --git a/util.py b/util.py
+index 1111111..2222222 100644
+--- a/util.py
++++ b/util.py
+@@ -1,3 +1,5 @@ def add(a, b):
+     """Add two numbers."""
+-    return a + b
++    result = a + b
++    return result

@@ -223,3 +223,32 @@ Per-language grammars, chunked review for large diffs (changed functions only, s
 ---
 
 *License: [TODO: Confirm — MIT or Apache-2.0.]*
+
+---
+
+## Appendix A: MVP Quickstart (implementation)
+
+No pip dependencies. Python 3.11+ stdlib only (`argparse`, `sqlite3`, `subprocess`, `urllib`, `unittest`).
+
+```bash
+# 1. Model (only runtime requirement)
+ollama serve &
+ollama pull qwen2.5-coder        # fallback: gemma3
+
+# 2. Run from the repo root — no install step
+python3 -m devmate.cli commit-msg                  # staged diff -> message
+python3 -m devmate.cli review                      # staged diff -> findings + DB record
+python3 -m devmate.cli review --diff-file eval/diffs/clean.diff --no-record
+python3 -m devmate.cli profile show                # weakness counters
+python3 -m devmate.cli practice                    # exercise for top weakness
+
+# 3. Verify without a model (rule-based stand-in, offline)
+python3 -m unittest discover -s tests -v
+python3 eval/eval.py
+# with a real model:
+python3 eval/eval.py --real
+```
+
+Env: `DEVMATE_MODEL` (default `qwen2.5-coder`), `OLLAMA_HOST` (default `http://localhost:11434`), `DEVMATE_DB` (default `~/.devmate/devmate.db`).
+
+Layout: `devmate/ollama_client.py`, `diff_reader.py`, `commit_msg.py`, `reviewer.py`, `profile.py`, `practice.py`, `cli.py`; `eval/eval.py` + `eval/diffs/*.diff`; `tests/test_parsing.py`, `tests/test_profile.py`. MVP scope only — no MCP server, Skill, PR/changelog, or tree-sitter dependency.

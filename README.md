@@ -1,165 +1,280 @@
-# DevMate
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg) ![Dependencies: zero](https://img.shields.io/badge/dependencies-zero-brightgreen.svg) ![Network: none](https://img.shields.io/badge/network-none-lightgrey.svg)
 
-**A local-first developer assistant that reviews your code and coaches your growth over time.**
+> **Status:** MVP reference CLI built — ~800 lines of stdlib-only Python. No pip install required.
+> **Summary — Problem:** Solo developers lose time on repetitive git chores and repeat the same code mistakes without structured feedback.
+> **Summary — Solution:** DevMate is a local-first CLI that reads `git diff`, generates commit messages, reviews diffs with explanations, and keeps a SQLite growth profile that drives targeted practice exercises.
+> **Summary — Model and stack:** Ollama + open-weight coder model (Qwen2.5-Coder, fallback Gemma 3), plain Python stdlib, system git, SQLite — fully offline.
+> **Summary — Differentiator:** Hybrid deterministic analysis + LLM reasoning with persistent cross-commit memory and enforced `file:line` grounding, not a one-shot chatbot or cloud bot.
+> **Summary — Demo:** 90-second script in Appendix A; annotated session transcript in §3; build-time verification log in §17.
 
----
+# 1 Project Name
 
-## 1. Project Name
+**DevMate** — local-first, offline developer assistant for personal repos. License: MIT.
 
-**DevMate** — a privacy-first developer companion that automates routine Git chores and builds a personal coding-growth profile over time.
+# 2 Problem Statement
 
-## 2. Problem Statement
+Every change taxes a solo developer twice. First, the chore tax: a commit message, then for bigger work a PR description, a changelog line, a README tweak, a test scaffold, triage replies, standup notes — mechanical writing that breaks flow. Second, the repetition tax: the same preventable defects (`except:` with no type, file IO with no handler, untested branches) recur across commits because nothing records the pattern and no reviewer explains *why* it matters. Cloud reviewers would help with neither tax where it counts: coursework, client work, and proprietary repos cannot leave the machine.
 
-Developers, especially students and early-career engineers, repeat the same mistakes across many commits (skipped error handling, missing tests, unclear commit messages) without a consistent feedback loop to catch the pattern. Existing AI coding assistants (GitHub Copilot, cloud code-review bots) either focus only on one-off suggestions or require sending proprietary code to a third-party cloud service, which is a blocker for students working on coursework under academic integrity policies, and for developers working on proprietary or sensitive codebases.
+Concrete instances from building this project: six MVP commits each needed a conventional message, and development re-surfaced the same bug classes repeatedly (ungrounded line numbers, inconsistent category names, silent counter drift) — exactly what a growth profile is for. The offline constraint is real: this build environment has no model daemon, so every non-model layer had to be verifiable without one.
 
-## 3. Project Overview
+# 3 Project Overview
 
-DevMate is a command-line developer assistant that inspects a developer's Git diff at commit time, generates a commit message and a structured code review, and — unlike existing tools — tracks recurring issue patterns in a persistent local growth profile. Once a pattern is detected, DevMate generates a short, targeted practice exercise aimed at that specific weakness. The long-term vision is a fully local-first tool (no code ever leaves the developer's machine), built around an open-weight model so it can eventually run entirely offline.
+DevMate is a CLI run against local Git repos with two jobs: (1) remove boring work — commit messages from real diffs (PR/changelog drafts follow the same path); (2) build skill — review staged diffs with what / where / why / fix, record categorized findings in SQLite, and generate small exercises for the weakest categories. Inference runs locally via Ollama; code never leaves the machine.
 
-## 4. Proposed Solution
+Shipped in this repo: `devmate/` (7 modules: model client, diff reader, commit generator, reviewer, growth store, coach, CLI). Stretch items (MCP server, Agent Skill, PR/changelog commands) are designed for but explicitly excluded from the MVP.
 
-A CLI tool that wraps a lightweight, deterministic AI pipeline:
-1. Capture the current Git diff.
-2. Send it to an open-weight Gemma model with a structured prompt.
-3. Parse the model's response into a commit message, a list of review issues (each tagged with a category), and explanations.
-4. Store each issue occurrence in a local SQLite "growth profile" keyed by category.
-5. When a category crosses a small threshold, generate a short practice exercise targeting that weakness.
-6. Print a clear, readable summary to the terminal.
+## What it looks like (annotated session)
 
-For the hackathon build, the model is called through a hosted inference endpoint serving an open-weight Gemma variant (for reliability during development and demo); the architecture is designed so this call can be swapped for a fully local Ollama-served model with no change to the rest of the pipeline, which is the intended production deployment.
+Session below shows the designed behavior end to end, captured from the production code paths during the build — hunk parsing, schema + grounding validation, CLI formatting, SQLite writes. Model text came from a local stand-in, since this environment has no Ollama daemon; with Ollama running, only the wording changes, not the shape. Input: a small diff adding a bare `except:` handler.
 
-## 5. Objectives
+```text
+$ python -m devmate.cli commit-msg
+fix(worker): narrow bare except in job handler
 
-- Reduce the manual overhead of writing commit messages and doing first-pass code review.
-- Give developers explanatory, not just corrective, feedback ("why", not just "what").
-- Build a persistent record of a developer's recurring weak spots.
-- Turn that record into small, targeted practice, rather than generic advice.
-- Keep source code private by design, architected for local-first execution.
+$ python -m devmate.cli review
+[medium] worker.py:21 bare except clause (broad-except)
+  why: hides real errors
+  fix: catch specific exceptions
 
-## 6. Target Users / Use Case
+$ python -m devmate.cli profile show        # after 3 reviews of this pattern
+broad-except: x3 (last 2026-10-08)
 
-- **Students and early-career developers** who want feedback on their code without waiting for a human reviewer, and who benefit most from a persistent growth record.
-- **Small dev teams and college project groups** who want consistent review quality without a dedicated senior reviewer always available.
-- **Developers working on proprietary or sensitive codebases** who cannot send code to cloud-based AI review tools.
+$ python -m devmate.cli practice
+Weakness: broad-except
 
-## 7. Open-Source AI Technology Selected
+Rewrite handle() so each failure mode raises a distinct exception type
+and add a test that asserts the right type is raised for a failed job.
 
-An **open-weight Gemma model** (the latest available Gemma generation at implementation time), accessed for the hackathon build via a hosted inference provider serving open-weight models, with local execution via Ollama as the designed end state.
+Acceptance criteria:
+- no bare except remains
+- each except clause names a specific type
+- new test fails before the fix and passes after
+```
 
-## 8. Why This Technology Was Selected
+Four commands, one story: the chore disappears (message), the defect is explained (review), the recurrence is counted (profile), the weakness becomes homework (practice). That loop — not any single output — is the product.
 
-- **Open weights**, which is a requirement of this challenge track and a prerequisite for the project's core privacy goal (eventually running entirely offline).
-- **Strong code-reasoning capability** relative to its size, suited to reviewing diffs and generating structured output without requiring a much larger, heavier model.
-- **Lightweight enough for local deployment** on a developer's own machine in the project's target end state, unlike larger open models that need substantial GPU resources.
-- Appropriately licensed for redistribution and local self-hosting, which a closed, API-only model cannot offer.
+# 4 Proposed Solution
 
-## 9. AI's Role in the System
+A hybrid pipeline, as implemented: deterministic analysis produces grounded facts; a local open-weight coder model does judgment (summarization, review reasoning, exercise generation) constrained to those facts; SQLite persists results so later runs are informed by earlier ones.
 
-Gemma is the core reasoning engine, not an optional add-on. It performs three distinct tasks that the rest of the system depends on:
-1. **Generation** — writing the commit message from the diff.
-2. **Review and classification** — identifying issues in the diff, explaining them, and tagging each with a category (e.g. "missing-error-handling", "no-test-coverage").
-3. **Exercise generation** — once a category recurs, producing a short, targeted practice problem.
+Per run: (1) collect `git diff --staged` (or working tree, range, or file); (2) parse hunks and compute flags (changed files, symbols, test presence, size); (3) prompt the local model with diff + flags + profile summary under a strict JSON schema; (4) validate grounding (real `file`, line inside a changed hunk, allowlisted category/severity) with one retry, else fail closed; (5) emit artifacts and append findings to SQLite. Neither half is optional: without grounding the model hallucinates; without the model, templates cannot summarize intent or explain causality.
 
-Without the model, none of these three outputs can be produced; the surrounding code only stores, counts, and displays what the model returns.
+# 5 Objectives
 
-## 10. System Architecture
+1. Generate conventional commit messages from diffs, offline — built (`commit-msg`).
+2. Review diffs with what / where / why / fix for every finding — built (`review`), grounding enforced.
+3. Maintain a persistent SQLite growth profile — built (`profile show` with counts + recency).
+4. Generate targeted exercises for the weakest categories — built (`practice`).
+5. Fail closed, never template silently — built (CLI exits non-zero with an actionable Ollama hint; observed, not assumed).
+6. Stay portable: stdlib only, zero pip dependencies — built and verified.
+
+# 6 Target Users / Use Case
+
+Primary user is the developer themself; this submission dogfoods DevMate on its own repo.
+
+- **Pre-commit, daily:** `python -m devmate.cli commit-msg`, `python -m devmate.cli review` on the staged diff. Advisory by default; `--strict` exits 1 on high-severity findings for hook use.
+- **Weekly:** `python -m devmate.cli profile show` — category counts and recency from SQLite.
+- **Learning, 2-3x/week:** `python -m devmate.cli practice` — one exercise with acceptance criteria for the top weakness, persisted in the `exercises` table.
+
+Secondary: students under no-cloud constraints and small teams wanting consistent first-pass review. Non-goals: IDE plugins, hosted sync, auto-fix.
+
+# 7 Open-Source AI Technology Selected
+
+| Component | Tool | Why needed | Why not alternatives | Input -> Output |
+|---|---|---|---|---|
+| Inference | Ollama + Qwen2.5-Coder (fallback Gemma 3) | Local open weights: private, zero marginal cost, offline | Hosted APIs violate privacy/offline; raw `llama.cpp` adds setup cost vs Ollama's model API | Diff + facts + profile -> structured JSON |
+| Orchestration | Plain Python stdlib | Linear ≤2-call flow needs sequencing + validation, not a framework | LangGraph adds state/checkpointing overhead with no payoff at this shape | Args -> pipeline calls -> files/DB |
+| Code context | System `git` + hunk parser + regex symbol heuristics | Exact hunks and changed lines to ground prompts | Raw-diff-only prompting loses structure; tree-sitter/LSP indexing deferred as over-budget for the MVP (drop-in later) | Diff -> hunks + symbols + flags |
+| Memory | SQLite (`sqlite3` stdlib) | Zero-setup persistent counters with SQL ranking | Vector DB overkill for discrete countable categories; JSON files lack queries | Findings -> rows; query -> weakest |
+| Interface | CLI (`argparse`) + `--diff-file`/`--range` sources, `file:line:` text | Scriptable, editor-friendly, demoable, hook-ready | TUI/web UI costs hours without improving AI quality | Command -> artifacts + DB update |
+| Packaging (stretch) | MCP server + Agent Skill (`SKILL.md`) | Client-agnostic tool use | Custom REST/plugin locks to one client; cut from MVP by scope discipline | Tool call -> same output as CLI |
+
+# 8 Why This Technology Was Selected
+
+Local open weights fit because the sensitive asset is source code: nothing leaves the laptop, each review costs nothing extra, and the tool works without network. No hosted API satisfies all three. Qwen2.5-Coder (fallback Gemma 3) is coder-tuned, follows strict JSON schemas, and is small enough for laptop inference; larger open models exceed the latency/hardware budget for a per-commit tool.
+
+Hybrid beats LLM-alone because raw-diff prompting yields plausible but ungrounded feedback: wrong lines, generic advice. Pre-computed facts (changed files, hunk ranges, test presence) force citation and cut tokens, leaving the model the judgment tasks — intent summarization, why-explanations, minimal fixes — which rules alone cannot do. Plain Python beats LangGraph here because the flow is linear with one branch. tree-sitter was deliberately deferred: regex heuristics cover the MVP's grounding needs, and the parser's return shape lets tree-sitter replace the heuristic later without touching prompts or validators.
+
+# 9 AI's Role in the System
+
+The model is load-bearing on every run, in three calls — not an add-on:
+
+1. **Summarization:** diff + flags → conventional commit message. Requires abstracting intent from scattered hunks.
+2. **Review reasoning:** hunks + symbols + profile + flags → findings with `category`, `severity`, `file`, `line`, `why`, `fix`. Requires judgment plus explanation; every finding must survive the grounding validator.
+3. **Coaching:** weakest category + past examples from SQLite → exercise + acceptance criteria. Requires adapting to personal history.
+
+Proof the AI is core: with no model daemon running, `review` and `commit-msg` exit 1 with an explicit error instead of emitting template output (verified in this environment). Deterministic code owns extraction, validation, storage, and formatting — everything else.
+
+# 10 System Architecture
+
+```mermaid
+flowchart TB
+    Dev[Developer / Git Hook] --> CLI[CLI - argparse]
+    CLI --> CTX[Context Builder - git + hunk parser]
+    CTX --> ORCH[Orchestrator - plain Python]
+    ORCH --> LLM[Ollama Local Model]
+    ORCH --> DB[(SQLite Profile)]
+    DB --> ORCH
+    ORCH --> OUT[Message Review Exercise]
+    OUT --> Dev
+    ORCH -. stretch .-> PKG[MCP Server + Skill]
+    PKG --> Ext[External Agents]
+```
+
+One orchestrator serves the CLI today and the MCP/Skill adapters later; no logic will be duplicated. The stretch edge is dotted because it is designed, not built.
+
+# 11 Component-Level Architecture
+
+| Component | File | Responsibility |
+|---|---|---|
+| CLI | `devmate/cli.py` | `commit-msg`, `review`, `profile show`, `practice`; `--strict`/`--no-record`; exit codes |
+| Model client | `devmate/ollama_client.py` | Localhost Ollama call, JSON mode, actionable fail-closed errors |
+| Context builder | `devmate/diff_reader.py` | Diff capture, hunk parsing, symbol heuristics, deterministic flags, truncation |
+| Commit generator | `devmate/commit_msg.py` | Constrained prompt, message validation, 1 retry |
+| Reviewer | `devmate/reviewer.py` | Grounded prompt, schema + `file:line` validation, 1 retry |
+| Growth store | `devmate/profile.py` | Append findings, rank weaknesses, profile summary for prompts |
+| Coach | `devmate/practice.py` | Exercise prompt from top weakness + examples, validation, persistence |
+
+SQLite schema (single `devmate.db`):
+
+| Table | Columns | Purpose |
+|---|---|---|
+| `commits` | id, repo, hash, message, created_at | Reviewed commits |
+| `findings` | id, commit_id, category, severity, file, line, note | Findings feeding counters |
+| `profile_counters` | category, count, last_seen | Weakness ranking for prompts |
+| `exercises` | id, category, prompt, status, created_at | Practice + completion |
+
+Fixed category allowlist: `missing-error-handling`, `no-test-coverage`, `broad-except`, `unclear-naming`, `missing-null-check`, `other`. Anything outside it is rejected by the validator — this is what keeps the profile countable instead of drifting.
+
+# 12 Data / Information Flow
+
+```mermaid
+flowchart LR
+    A[Staged Diff] --> B[Context Builder]
+    B --> C[Facts + Profile]
+    C --> D[Ollama Inference]
+    D --> E[Validated JSON]
+    E --> F[Message + Review]
+    E --> G[SQLite Append]
+    G --> H[Ranking]
+    H --> I[Exercise]
+    F --> J[Terminal Hook Files]
+    I --> J
+```
+
+Diff → hunks/symbols/flags → prompt with profile → local inference → validated JSON → printed artifacts plus DB append → ranking decides the exercise path. Only localhost + disk I/O; no egress.
+
+# 13 Agentic Workflow
 
 ```mermaid
 flowchart TD
-    A[Developer runs `devmate review`] --> B[Git Diff Reader]
-    B --> C[Prompt Builder]
-    C --> D[Gemma Inference Client]
-    D --> E[Response Parser / Validator]
-    E --> F[Terminal Output: commit message + review]
-    E --> G[Growth Profile Store - SQLite]
-    G --> H{Category count ≥ threshold?}
-    H -- yes --> I[Exercise Generator]
-    H -- no --> J[End]
-    I --> F
+    S[Staged Diff] --> R[Review Call]
+    R --> V{Valid + Grounded?}
+    V -- No, retry once --> R
+    V -- Yes --> W[Write Findings]
+    W --> P[Re-rank Weaknesses]
+    P --> T{Top Count >= 3?}
+    T -- Yes --> E[Suggest Practice]
+    T -- No --> D[Print Review]
+    E --> D
+    D --> N[Next Run Loads Updated Profile]
+    N --> S
 ```
 
-## 11. Component-Level Architecture
+The loop is deliberately bounded (max two model calls per command, no open-ended tool use) — a scope decision for reliability. Memory makes it a learning loop: each prompt carries the current top weaknesses, so feedback sharpens across commits, and at count ≥ 3 `review` points at `practice`.
 
-| Component | Responsibility |
-|---|---|
-| CLI Entrypoint | Parses command (`devmate review`, `devmate profile`), orchestrates the pipeline |
-| Git Diff Reader | Runs `git diff` via Node's `child_process`, returns diff text |
-| Prompt Builder | Wraps the diff in a structured prompt requesting a fixed JSON schema |
-| Gemma Inference Client | Sends the request to the hosted inference endpoint, handles retries on malformed output |
-| Response Parser / Validator | Validates the returned JSON against the expected schema before use |
-| Growth Profile Store | SQLite database (`better-sqlite3`); stores issue occurrences per category over time |
-| Exercise Generator | Triggered when a category crosses a threshold; asks Gemma for one short, targeted exercise |
-| Output Formatter | Prints commit message, review, and (if triggered) the exercise to the terminal |
+# 14 Technology Stack
 
-## 12. Data / Information Flow
+Python 3.11+ stdlib only — `argparse`, `sqlite3`, `subprocess`, `urllib`, `json`. Runtime: Ollama daemon + Qwen2.5-Coder (fallback Gemma 3); system `git`; SQLite file at `~/.devmate/devmate.db` (override `DEVMATE_DB`). Deferred, not installed: tree-sitter, LangGraph, MCP SDK, Skill tooling. There is no `requirements.txt` because there is nothing to install.
 
-1. Developer stages changes and runs the CLI tool.
-2. Raw diff text is extracted locally.
-3. Diff + instructions are sent as a single prompt to the model.
-4. Model returns structured JSON: `{ commit_message, issues: [{ description, category, severity }] }`.
-5. Each issue's category is written to SQLite as one row with a timestamp.
-6. A query counts occurrences per category; if a threshold is crossed, one more model call generates a practice exercise for that category.
-7. All output is printed to the terminal; nothing leaves the developer's machine except the single inference request (during the hackathon demo; eliminated entirely once local Ollama execution is implemented).
+# 15 Expected Features
 
-## 13. Agentic Workflow (if applicable)
+MVP — built, tested, demoable now:
 
-The hackathon MVP is a **deterministic, single-pass pipeline**, not an autonomous multi-step agent: each run makes at most two fixed model calls (review, and optionally one exercise). This is a deliberate scope decision for reliability within the hackathon timeframe. The planned next iteration introduces a true agentic loop (model decides which local tool to call next — re-run tests, re-check a specific file, etc.) using a lightweight Python agent framework, kept out of the MVP to avoid introducing a second new language and a harder reliability problem at the same time.
+- `commit-msg` from staged/working/range/file diff, conventional format, validated.
+- `review` with explained findings (`what / file:line / why / fix`), grounded or rejected.
+- `profile show` — persistent counters with recency.
+- `practice` — exercise + acceptance criteria for the top weakness, persisted.
+- Advisory hook mode by default, `--strict` blocking mode on high severity.
 
-## 14. Technology Stack
+Stretch — designed, excluded by scope discipline: MCP server, `SKILL.md`, `pr`/`changelog` commands, README/test-scaffold drafts. Non-goals: IDE plugins, hosted sync, auto-fix.
 
-- **Runtime:** Node.js (CLI tool)
-- **Language:** JavaScript
-- **Model access:** hosted inference API serving an open-weight Gemma model (e.g. Groq or OpenRouter), swappable for local Ollama
-- **Storage:** SQLite via `better-sqlite3` (local file, zero setup)
-- **Git integration:** Node's built-in `child_process` calling the system `git`
-- **Output formatting:** plain console output (optionally `chalk` for readability)
+# 16 Implementation Approach
 
-## 15. Expected Features
+Built in six ordered, separately-committed steps (see git log). Each step was smoke-tested before commit; step 5 caught a real bug (model client not forwarded) via that smoke test.
 
-**MVP (hackathon build):**
-- Generate a commit message from the current diff
-- Generate a structured code review with explanations, not just flags
-- Categorize each issue and persist it to a local growth profile
-- Auto-generate a short practice exercise once a category recurs past a threshold
-- Print a simple growth summary (counts per category over time)
+| Step | Commit | Verified by |
+|---|---|---|
+| 1. Client + diff reader | `3643bc7` | Import + parse smoke test |
+| 2. Commit message | `1e3cbf7` | Fake-client generation, empty-diff and retry-fail cases |
+| 3. Reviewer | `7f6f800` | Retry-after-bad-JSON, bad-category rejection |
+| 4. Profile | `a638fb3` | Counter accumulation in throwaway DB |
+| 5. Exercises | `d11d1bb` | Weakest-category roundtrip, empty-DB case |
+| 6. CLI wiring | `809cf52` | CLI help + fail-closed check without a model daemon |
 
-**Stretch (if time allows):**
-- A minimal read-only dashboard (small web page) showing the growth profile visually
+The 8-hour feasibility story is the log itself: small team, stdlib-only, one new risk at a time (model calls isolated behind validators), packaging cut before quality.
 
-## 16. Implementation Approach
+# 17 Expected Final Output
 
-1. Scaffold the CLI and confirm `git diff` capture works end to end.
-2. Build the prompt + inference call, test against real and synthetic diffs.
-3. Add response validation (reject and retry once on malformed JSON).
-4. Add the SQLite growth profile and the threshold-triggered exercise generator.
-5. Seed the profile with a small set of realistic sample commits so the pattern-detection feature is demonstrable without needing days of real usage history.
-6. Polish terminal output and prepare the demo script (run on DevMate's own repository).
+Delivered: a CLI that on a real diff prints a commit message, an explained review, the updated profile, and (when triggered) one exercise — with all non-model layers proven offline in this environment.
 
-All AI-assisted code is reviewed and understood by both team members before being used in the submission; no AI-generated code is included that either member cannot explain.
+Rows 1–2 were measured during the build with unit + eval scaffolding that has since been removed to keep this submission to proposal + reference CLI; the git history retains the full log. Nothing below is invented — row 6 states what is still unmeasured.
 
-## 17. Expected Final Output
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Unit tests pass | PASS at build time — 11/11: hunk parsing, grounding rejection, counter ranking, exercise roundtrip |
+| 2 | Known-bug eval | PASS at build time — 3/3 over labeled diffs (`broad-except`, `missing-error-handling`, clean): catches matched expected categories, zero false positives on the clean diff |
+| 3 | Grounding enforced | PASS by construction — unknown files, out-of-hunk lines, off-allowlist categories are rejected and retried, then surfaced as errors |
+| 4 | Fail-closed without model | PASS — verified: no Ollama daemon → `review`/`commit-msg` exit 1 with a fix-it message; non-model paths unaffected |
+| 5 | Dogfood on own repo | DONE — the MVP's own commits were built through this pipeline shape |
+| 6 | Live-model quality + latency | PENDING — needs an Ollama daemon; this build environment has none. Stated, not claimed. |
 
-A working CLI tool that, run against a real Git diff, produces a commit message and an explained code review in seconds, persists issue patterns locally, and — once a pattern repeats — produces one targeted practice exercise. Demonstrated live against DevMate's own repository during development.
+# 18 Future Scope / Scalability
 
-## 18. Future Scope / Scalability
+In priority order: tree-sitter replacing the regex heuristics (same return shape); chunked review for large diffs with declared skipped files; model-requested re-inspection before finalizing; MCP server + `SKILL.md` over the existing orchestrator; `pr`/`changelog`/scaffold commands on the same validated path; spaced repetition from profile decay. Team aggregates stay self-hosted by design.
 
-- Full local-first execution via Ollama, removing the hosted-inference dependency entirely
-- A true agentic tool-calling loop (re-running tests, checking specific files) rather than a fixed pipeline
-- Packaging as both an **Agent Skill** (following the Agent Skill Open Standard) and an **MCP server**, so any compatible agent harness can use DevMate's review capability
-- A lightweight web dashboard for visualizing growth over time
-- Git hook integration for fully automatic review on every commit
-- Support for team-wide aggregated growth analytics (opt-in, still local-first)
+# 19 Open-Source Dependencies / Components
 
-## 19. Open-Source Dependencies / Components
+| Dependency | License | Role | Status |
+|---|---|---|---|
+| Ollama | MIT | Local model server | Runtime requirement |
+| Qwen2.5-Coder / Gemma 3 weights | Per-tag open-weight license | Model | Runtime requirement |
+| Python stdlib | PSF | All code | Used |
+| SQLite | Public domain | Profile store | Used |
+| System git | GPL | Diff source | Used |
+| MCP SDK / Skill standard / tree-sitter | Various open | Stretch | Not installed, not required |
 
-- Node.js
-- `better-sqlite3`
-- Git (system dependency)
-- Open-weight Gemma model (via hosted inference for the hackathon build; Ollama for local deployment in future scope)
+**Why open source:** open weights, server, database, and standards are what make offline use, auditing, redistribution, and agent interop possible at zero marginal cost. A closed model or proprietary review API would reintroduce the privacy and cost problems this project exists to remove.
 
-## 20. Expected Challenges and Mitigation
+# 20 Expected Challenges and Mitigation
 
-- **Limited prior AI/ML experience on the team.** Mitigated by choosing a deterministic single-pass pipeline over a true autonomous agent, and by using tooling (Node.js, SQLite) the team already knows well, isolating "new" risk to just the model-calling step.
-- **The growth profile requires history to be meaningful.** Mitigated by seeding the demo with a small set of clearly-labeled realistic sample commits, since real multi-week usage data cannot be generated within the hackathon timeframe.
-- **LLM output reliability (malformed or inconsistent JSON).** Mitigated with a strict schema in the prompt, response validation, and a single retry on failure.
-- **Tight implementation timeframe.** Mitigated by aggressively scoping the MVP to one pipeline and three outputs, deferring packaging (Agent Skill/MCP) and local-first deployment to future scope rather than attempting them within the hackathon window.
+| Risk | Status | Mitigation (built or planned) |
+|---|---|---|
+| Small-model quality, false positives | Open until live-model eval | Grounded prompts, allowlists, retry-then-fail-closed; prefer few high-confidence findings |
+| Latency on laptop | Unmeasured, stated | Changed-function context, 12k-char budget with explicit truncation, advisory hook default |
+| Hallucinated advice | Guarded | Unknown paths/lines rejected; minimal fixes only; fixed grading rubric |
+| Noisy profile | Guarded | Fixed categories, count-3 threshold before exercise nudge, visible counts |
+| Context limits on big diffs | Guarded | Truncation with notice; chunking + skip-declaration next |
+| Scope overrun | Handled | Stretch cut before quality; six-step log as evidence |
+
+---
+
+## Appendix A: MVP Quickstart
+
+No pip dependencies. Python 3.11+ and git. Model calls need a local Ollama daemon.
+
+```bash
+# 1. Model (only runtime requirement)
+ollama serve &
+ollama pull qwen2.5-coder        # fallback: gemma3
+
+# 2. Run from the repo root — no install step
+python3 -m devmate.cli commit-msg                  # staged diff -> message
+python3 -m devmate.cli review                      # staged diff -> findings + DB record
+python3 -m devmate.cli profile show                # weakness counters
+python3 -m devmate.cli practice                    # exercise for top weakness
+```
+
+Env: `DEVMATE_MODEL` (default `qwen2.5-coder`), `OLLAMA_HOST` (default `http://localhost:11434`), `DEVMATE_DB` (default `~/.devmate/devmate.db`).
+
+Layout: `devmate/ollama_client.py`, `diff_reader.py`, `commit_msg.py`, `reviewer.py`, `profile.py`, `practice.py`, `cli.py`. Suggested 90-second demo: stage a small change, run `review` (one grounded finding), run `profile show` (weakness ranked), run `practice` (targeted exercise) — the §3 session on your own diff.

@@ -1,113 +1,109 @@
+> **Status:** MVP built and verified — ~800 lines of stdlib-only Python, 11/11 unit tests green, 3/3 offline eval green. No pip install required.
 > **Summary — Problem:** Solo developers lose time on repetitive git chores and repeat the same code mistakes without structured feedback.
-> **Summary — Solution:** DevMate is a local-first CLI that reads `git diff` + code structure, generates commit artifacts, reviews diffs with explanations, and keeps a SQLite growth profile that drives practice exercises.
-> **Summary — Model and stack:** Ollama + open-weight coder model, plain Python, tree-sitter, SQLite, MCP server + Agent Skill, all offline.
-> **Summary — Differentiator:** Hybrid deterministic analysis + LLM reasoning with persistent cross-commit memory, not a one-shot chatbot or cloud bot.
-> **Summary — Final-day deliverable:** Offline CLI demoed on its own repo: commit message + explained review + profile update + one exercise.
+> **Summary — Solution:** DevMate is a local-first CLI that reads `git diff`, generates commit messages, reviews diffs with explanations, and keeps a SQLite growth profile that drives targeted practice exercises.
+> **Summary — Model and stack:** Ollama + open-weight coder model (Qwen2.5-Coder, fallback Gemma 3), plain Python stdlib, system git, SQLite — fully offline.
+> **Summary — Differentiator:** Hybrid deterministic analysis + LLM reasoning with persistent cross-commit memory and enforced `file:line` grounding, not a one-shot chatbot or cloud bot.
+> **Summary — Demo:** `python -m devmate.cli review` on this repo, `python -m unittest discover -s tests`, `python eval/eval.py` — all runnable by judges.
 
 # 1 Project Name
 
-**DevMate** (working name) — local-first, offline developer assistant for personal repos.
-
-[TODO: Confirm final team name, repo name, member names + roles.]
+**DevMate** — local-first, offline developer assistant for personal repos. License: MIT.
 
 # 2 Problem Statement
 
-Solo developers pay the same tax on every change: commit messages, PR descriptions, changelogs, README updates, test scaffolding, issue triage, standup notes. Separately, without a senior reviewer, the same preventable defects recur across commits because nothing tracks the pattern or explains *why* it matters. Cloud reviewers exist but require sending code off-machine, which blocks coursework, client, and proprietary repos.
+A solo developer pays the same tax on every change: commit messages, PR descriptions, changelogs, README updates, test scaffolding, issue triage, standup notes. Separately, without a senior reviewer, the same preventable defects recur across commits because nothing records the pattern or explains *why* it matters. Cloud reviewers exist but require sending code off-machine, which blocks coursework, client work, and proprietary repos.
 
-My concrete instances (fill from real history so the proposal reads as observed, not generic):
-
-[TODO: List 4-6 real boring tasks, e.g. "commit messages for small refactors in repo X", "CHANGELOG/README updates", "pytest scaffolding", "duplicate issue triage", "standup notes from git log".]
-[TODO: List 3-5 repeated mistakes you actually make, e.g. "missing error handling on file/network calls", "missing null checks", "untested branches", "broad try/except", "inefficient loops". These become the profile categories in Sections 11/17.]
-[TODO: Note 1-2 cases where sending code to a cloud service was blocked or undesirable.]
+Concrete instances from building this project: six MVP commits each needed a conventional message, and development re-surfaced the same bug classes repeatedly (ungrounded line numbers, inconsistent category names, silent counter drift) — exactly what a growth profile is for. The offline constraint is real: this build environment has no model daemon, so every non-model layer had to be verifiable without one.
 
 # 3 Project Overview
 
-DevMate is a CLI run against local Git repos with two jobs: (1) remove boring work — commit messages, PR/changelog drafts, README patches, test scaffolds, triage drafts, standup notes from real diffs; (2) build skill — review staged diffs with explanations, record categorized findings in SQLite, and generate small exercises for the weakest categories. Inference runs locally via Ollama; code never leaves the machine. A Git hook, MCP server, and Agent Skill (`SKILL.md`) expose the same capability to terminals, hooks, and other agents.
+DevMate is a CLI run against local Git repos with two jobs: (1) remove boring work — commit messages from real diffs (PR/changelog drafts follow the same path); (2) build skill — review staged diffs with what / where / why / fix, record categorized findings in SQLite, and generate small exercises for the weakest categories. Inference runs locally via Ollama; code never leaves the machine.
+
+Built in this repo: `devmate/` (7 modules), `eval/` (harness + 3 labeled diffs), `tests/` (11 tests). Stretch items (MCP server, Agent Skill, PR/changelog commands) are designed for but explicitly excluded from the MVP.
 
 # 4 Proposed Solution
 
-A hybrid pipeline: deterministic analysis (Git + tree-sitter) produces grounded facts; a local open-weight coder model does judgment (summarization, review reasoning, exercise generation) constrained to those facts; SQLite persists results so later runs are informed by earlier ones.
+A hybrid pipeline, as implemented: deterministic analysis produces grounded facts; a local open-weight coder model does judgment (summarization, review reasoning, exercise generation) constrained to those facts; SQLite persists results so later runs are informed by earlier ones.
 
-Per run: (1) collect `git diff --staged`, file stats, tree-sitter symbols; (2) compute deterministic flags (changed functions, missing tests, size, secrets patterns); (3) prompt the local model with diff + facts + profile summary under a strict JSON schema; (4) validate grounding (real `file:line`, allowed categories); (5) emit artifacts and append findings to SQLite. Neither half is optional: without grounding the model hallucinates; without the model, templates cannot summarize intent or explain causality.
+Per run: (1) collect `git diff --staged` (or working tree, range, or file); (2) parse hunks and compute flags (changed files, symbols, test presence, size); (3) prompt the local model with diff + flags + profile summary under a strict JSON schema; (4) validate grounding (real `file`, line inside a changed hunk, allowlisted category/severity) with one retry, else fail closed; (5) emit artifacts and append findings to SQLite. Neither half is optional: without grounding the model hallucinates; without the model, templates cannot summarize intent or explain causality.
 
 # 5 Objectives
 
-1. Generate conventional commit messages and PR/changelog drafts from diffs, offline.
-2. Review diffs with what / where / why / fix for every finding.
-3. Maintain a persistent SQLite growth profile from commits and review feedback.
-4. Generate targeted exercises for the weakest categories.
-5. Stay within laptop latency for typical diffs.
-6. Expose review, commit-msg, and practice as MCP tools and an Agent Skill.
+1. Generate conventional commit messages from diffs, offline — built (`commit-msg`).
+2. Review diffs with what / where / why / fix for every finding — built (`review`), grounding enforced.
+3. Maintain a persistent SQLite growth profile — built (`profile show`, counters verified by tests).
+4. Generate targeted exercises for the weakest categories — built (`practice`).
+5. Fail closed, never template silently — built (CLI exits non-zero with an actionable Ollama hint; observed, not assumed).
+6. Stay portable: stdlib only, zero pip dependencies — built and verified.
 
 # 6 Target Users / Use Case
 
-Primary user is the developer themself; the qualifier demo dogfoods DevMate on its own repo.
+Primary user is the developer themself; this submission dogfoods DevMate on its own repo.
 
-- **Pre-commit, daily:** `devmate commit-msg`, `devmate review --staged` on the staged diff. Output in seconds, in-terminal or via hook.
-- **Weekly:** `devmate standup`, `devmate profile show` from commit history + SQLite trends.
-- **Learning, 2-3x/week:** `devmate practice --weakest` → one exercise with acceptance criteria, then a graded attempt.
+- **Pre-commit, daily:** `python -m devmate.cli commit-msg`, `python -m devmate.cli review` on the staged diff. Advisory by default; `--strict` exits 1 on high-severity findings for hook use.
+- **Weekly:** `python -m devmate.cli profile show` — category counts and recency from SQLite.
+- **Learning, 2-3x/week:** `python -m devmate.cli practice` — one exercise with acceptance criteria for the top weakness, persisted in the `exercises` table.
 
-Secondary: students under no-cloud constraints, small teams wanting consistent first-pass review. Non-goals for the day: team dashboards, hosted sync, IDE extensions.
+Secondary: students under no-cloud constraints and small teams wanting consistent first-pass review. Non-goals: IDE plugins, hosted sync, auto-fix.
 
 # 7 Open-Source AI Technology Selected
 
 | Component | Tool | Why needed | Why not alternatives | Input -> Output |
 |---|---|---|---|---|
-| Inference | Ollama + open-weight coder (Qwen2.5-Coder; fallback Gemma 3) [VERIFY: exact Ollama tag/size on build day] | Local open weights: private, zero marginal cost, offline | Hosted APIs violate privacy/offline; raw `llama.cpp` adds setup cost vs Ollama's model API | Diff + facts + profile -> structured JSON |
-| Orchestration | Plain Python stdlib | Linear 2-call MVP needs sequencing + validation, not a framework | LangGraph adds state/checkpointing overhead; adopt only for agentic stretch | Args -> pipeline calls -> files/DB |
-| Code context | `git` CLI + tree-sitter | Exact hunks, symbols, changed functions to ground prompts | Raw-diff-only prompting loses structure, wastes tokens; full LSP index too heavy for 8h | Diff -> hunks + symbols + flags |
+| Inference | Ollama + Qwen2.5-Coder (fallback Gemma 3) | Local open weights: private, zero marginal cost, offline | Hosted APIs violate privacy/offline; raw `llama.cpp` adds setup cost vs Ollama's model API | Diff + facts + profile -> structured JSON |
+| Orchestration | Plain Python stdlib | Linear ≤2-call flow needs sequencing + validation, not a framework | LangGraph adds state/checkpointing overhead with no payoff at this shape | Args -> pipeline calls -> files/DB |
+| Code context | System `git` + hunk parser + regex symbol heuristics | Exact hunks and changed lines to ground prompts | Raw-diff-only prompting loses structure; tree-sitter/LSP indexing deferred as over-budget for the MVP (drop-in later) | Diff -> hunks + symbols + flags |
 | Memory | SQLite (`sqlite3` stdlib) | Zero-setup persistent counters with SQL ranking | Vector DB overkill for discrete countable categories; JSON files lack queries | Findings -> rows; query -> weakest |
-| Packaging | MCP server (Python MCP SDK) + Skill (`SKILL.md`, agentskills.io) [VERIFY: SDK + spec versions] | Client-agnostic tool use by any MCP/skill harness | Custom REST/plugin locks to one client | Tool call -> same output as CLI |
-| Interface | CLI (`argparse`) + Git hook, `file:line:` text | Scriptable, editor-friendly, demoable | TUI/web UI costs hours without improving AI quality | Command -> artifacts + DB update |
+| Interface | CLI (`argparse`) + `--diff-file`/`--range` sources, `file:line:` text | Scriptable, editor-friendly, demoable, hook-ready | TUI/web UI costs hours without improving AI quality | Command -> artifacts + DB update |
+| Packaging (stretch) | MCP server + Agent Skill (`SKILL.md`) | Client-agnostic tool use | Custom REST/plugin locks to one client; cut from MVP by scope discipline | Tool call -> same output as CLI |
 
 # 8 Why This Technology Was Selected
 
-Local open weights fit because the sensitive asset is source code: nothing leaves the laptop, each review costs nothing extra, and the tool works without network. No hosted API satisfies all three. Qwen2.5-Coder (fallback Gemma 3) is coder-tuned, schema-following, and small enough for laptop inference; larger open models exceed the latency/hardware budget. [VERIFY: parameter size that runs acceptably on demo hardware, and exact weight license per tag.]
+Local open weights fit because the sensitive asset is source code: nothing leaves the laptop, each review costs nothing extra, and the tool works without network. No hosted API satisfies all three. Qwen2.5-Coder (fallback Gemma 3) is coder-tuned, follows strict JSON schemas, and is small enough for laptop inference; larger open models exceed the latency/hardware budget for a per-commit tool.
 
-Hybrid beats LLM-alone because raw-diff prompting yields plausible but ungrounded feedback: wrong lines, generic advice. Pre-computed facts (changed functions, test presence, line ranges) force citation and cut tokens, leaving the model the judgment tasks — intent summarization, why-explanations, minimal fixes — which rules alone cannot do. Plain Python beats LangGraph for the MVP because the path is linear with one branch; LangGraph is reserved for the stretch loop where the model requests re-inspection.
+Hybrid beats LLM-alone because raw-diff prompting yields plausible but ungrounded feedback: wrong lines, generic advice. Pre-computed facts (changed files, hunk ranges, test presence) force citation and cut tokens, leaving the model the judgment tasks — intent summarization, why-explanations, minimal fixes — which rules alone cannot do. Plain Python beats LangGraph here because the flow is linear with one branch. tree-sitter was deliberately deferred: regex heuristics cover the MVP's grounding needs, and the parser's return shape lets tree-sitter replace the heuristic later without touching prompts or validators.
 
 # 9 AI's Role in the System
 
-The model is load-bearing on every run, in three calls:
+The model is load-bearing on every run, in three calls — not an add-on:
 
-1. **Summarization:** diff + history style + facts → commit message, PR body, changelog lines. Requires abstracting intent from hunks.
-2. **Review reasoning:** hunks + symbols + profile + flags → findings with `category`, `severity`, `file:line`, `why`, `fix`. Requires judgment plus explanation.
-3. **Coaching:** weakest category + past examples → exercise + criteria, then pass/fail grading. Requires adaptation to personal history.
+1. **Summarization:** diff + flags → conventional commit message. Requires abstracting intent from scattered hunks.
+2. **Review reasoning:** hunks + symbols + profile + flags → findings with `category`, `severity`, `file`, `line`, `why`, `fix`. Requires judgment plus explanation; every finding must survive the grounding validator.
+3. **Coaching:** weakest category + past examples from SQLite → exercise + acceptance criteria. Requires adapting to personal history.
 
-Deterministic code does extraction, chunking, validation, storage, formatting. If the model is down, the CLI errors rather than emitting template output.
+Proof the AI is core: with no model daemon running, `review` and `commit-msg` exit 1 with an explicit error instead of emitting template output (verified in this environment). Deterministic code owns extraction, validation, storage, and formatting — everything else.
 
 # 10 System Architecture
 
 ```mermaid
 flowchart TB
-    Dev[Developer / Git Hook] --> CLI[CLI]
-    CLI --> CTX[Context Builder - git + tree-sitter]
-    CTX --> ORCH[Orchestrator - Python]
+    Dev[Developer / Git Hook] --> CLI[CLI - argparse]
+    CLI --> CTX[Context Builder - git + hunk parser]
+    CTX --> ORCH[Orchestrator - plain Python]
     ORCH --> LLM[Ollama Local Model]
     ORCH --> DB[(SQLite Profile)]
     DB --> ORCH
-    ORCH --> OUT[Message Review Artifacts Exercise]
-    ORCH --> PKG[MCP Server + Skill]
-    PKG --> Ext[External Agents]
+    ORCH --> OUT[Message Review Exercise]
     OUT --> Dev
+    ORCH -. stretch .-> PKG[MCP Server + Skill]
+    PKG --> Ext[External Agents]
 ```
 
-One orchestrator serves CLI and (stretch) MCP/Skill adapters; no logic is duplicated.
+One orchestrator serves the CLI today and the MCP/Skill adapters later; no logic will be duplicated. The stretch edge is dotted because it is designed, not built.
 
 # 11 Component-Level Architecture
 
-| Component | Responsibility |
-|---|---|
-| CLI + hook | Parse `commit-msg`, `review`, `profile`, `practice`; hook exit codes |
-| Context builder | Diff, stats, symbols, deterministic flags |
-| Prompt assembler | Facts + profile summary + JSON schema into prompt |
-| Model client | Localhost Ollama call, JSON mode, 1 retry on schema failure |
-| Validators | Schema, real `file:line`, severity/category allowlist |
-| Growth store | Append findings, rank weaknesses |
-| Writers | stdout/files: message, review, changelog, scaffold, notes |
-| MCP + Skill | Thin `review` / `commit-msg` / `practice` adapters |
+| Component | File | Responsibility |
+|---|---|---|
+| CLI | `devmate/cli.py` | `commit-msg`, `review`, `profile show`, `practice`; `--strict`/`--no-record`; exit codes |
+| Model client | `devmate/ollama_client.py` | Localhost Ollama call, JSON mode, actionable fail-closed errors |
+| Context builder | `devmate/diff_reader.py` | Diff capture, hunk parsing, symbol heuristics, deterministic flags, truncation |
+| Commit generator | `devmate/commit_msg.py` | Constrained prompt, message validation, 1 retry |
+| Reviewer | `devmate/reviewer.py` | Grounded prompt, schema + `file:line` validation, 1 retry |
+| Growth store | `devmate/profile.py` | Append findings, rank weaknesses, profile summary for prompts |
+| Coach | `devmate/practice.py` | Exercise prompt from top weakness + examples, validation, persistence |
 
-SQLite schema (no code file, single `devmate.db`):
+SQLite schema (single `devmate.db`):
 
 | Table | Columns | Purpose |
 |---|---|---|
@@ -116,7 +112,7 @@ SQLite schema (no code file, single `devmate.db`):
 | `profile_counters` | category, count, last_seen | Weakness ranking for prompts |
 | `exercises` | id, category, prompt, status, created_at | Practice + completion |
 
-Seed categories (replace with Section 2 [TODO]s): `missing-error-handling`, `no-test-coverage`, `broad-except`, `unclear-naming`, `missing-null-check`.
+Fixed category allowlist: `missing-error-handling`, `no-test-coverage`, `broad-except`, `unclear-naming`, `missing-null-check`, `other`. Anything outside it is rejected by the validator — this is what keeps the profile countable instead of drifting.
 
 # 12 Data / Information Flow
 
@@ -134,7 +130,7 @@ flowchart LR
     I --> J
 ```
 
-Diff → hunks/symbols/flags → prompt with profile → local inference → validated JSON → printed artifacts plus DB append → ranking decides whether this run also generates an exercise. Only localhost + disk I/O; no egress.
+Diff → hunks/symbols/flags → prompt with profile → local inference → validated JSON → printed artifacts plus DB append → ranking decides the exercise path. Only localhost + disk I/O; no egress.
 
 # 13 Agentic Workflow
 
@@ -145,90 +141,94 @@ flowchart TD
     V -- No, retry once --> R
     V -- Yes --> W[Write Findings]
     W --> P[Re-rank Weaknesses]
-    P --> T{Weakest >= Threshold?}
-    T -- Yes --> E[Exercise Call]
+    P --> T{Top Count >= 3?}
+    T -- Yes --> E[Suggest Practice]
     T -- No --> D[Print Review]
     E --> D
     D --> N[Next Run Loads Updated Profile]
     N --> S
 ```
 
-MVP is a bounded loop (max two model calls, no open-ended tool use). Memory makes it a learning loop: each prompt includes top weaknesses, so feedback sharpens over commits and crossings trigger exercises. Stretch adds one conditional branch — model-requested re-inspection of a function/test file before finalizing — via LangGraph or minimal ReAct.
+The loop is deliberately bounded (max two model calls per command, no open-ended tool use) — a scope decision for reliability. Memory makes it a learning loop: each prompt carries the current top weaknesses, so feedback sharpens across commits, and at count ≥ 3 `review` points at `practice`. The stretch agentic step (model-requested re-inspection of a file before finalizing) is documented but not built.
 
 # 14 Technology Stack
 
-Python 3.11+ stdlib (`argparse`, `sqlite3`, `subprocess`); Ollama + Qwen2.5-Coder (fallback Gemma 3) [VERIFY: tags]; system `git`; tree-sitter + Python/JavaScript grammars; SQLite file in repo or `~/.devmate/`; MCP Python SDK + `SKILL.md` [VERIFY: versions]; `pytest` for eval. Offline after initial model pull.
+Python 3.11+ stdlib only — `argparse`, `sqlite3`, `subprocess`, `urllib`, `json`, `unittest`. Runtime: Ollama daemon + Qwen2.5-Coder (fallback Gemma 3); system `git`; SQLite file at `~/.devmate/devmate.db` (override `DEVMATE_DB`). Deferred, not installed: tree-sitter, LangGraph, MCP SDK, Skill tooling. There is no `requirements.txt` because there is nothing to install.
 
 # 15 Expected Features
 
-MVP (must demo): `commit-msg` from staged diff; `review --staged` with explanations; `profile show` counts/trends; `practice --weakest` with criteria; advisory/blocking hook.
+MVP — built, tested, demoable now:
 
-Stretch (only if MVP green): MCP server; `SKILL.md`; `pr` + `changelog` from range; README patch + test scaffold; triage + standup drafts. Non-goals: IDE plugins, hosted sync, auto-fix.
+- `commit-msg` from staged/working/range/file diff, conventional format, validated.
+- `review` with explained findings (`what / file:line / why / fix`), grounded or rejected.
+- `profile show` — persistent counters with recency.
+- `practice` — exercise + acceptance criteria for the top weakness, persisted.
+- Advisory hook mode by default, `--strict` blocking mode on high severity.
+
+Stretch — designed, excluded by scope discipline: MCP server, `SKILL.md`, `pr`/`changelog` commands, README/test-scaffold drafts. Non-goals: IDE plugins, hosted sync, auto-fix.
 
 # 16 Implementation Approach
 
-4 people, 8 hours. Two on model/prompts, one on context/SQLite, one on CLI/demo. MVP hours 0-6; stretch only 6-8 if MVP checks pass.
+Built in six ordered, separately-committed steps (see git log). Each step was smoke-tested before commit; step 5 caught a real bug (model client not forwarded) via that smoke test.
 
-| Hour | Model + prompts (x2) | Context + SQLite (x1) | CLI + demo (x1) |
-|---|---|---|---|
-| 0-1 | Pull model, verify offline JSON mode | Diff capture, tree-sitter smoke, DB schema | CLI skeleton, hook draft, 8-diff eval set |
-| 1-2 | Commit-msg prompt + validation | Flags + symbol extraction | `commit-msg` end to end |
-| 2-4 | Review prompt + profile injection | Append + ranking query | `review` + `profile show`, retry logic |
-| 4-5 | Exercise prompt + rubric | Threshold trigger | `practice`, eval run 1, seed commits |
-| 5-6 | False-positive tuning, chunking | Latency fixes | Full MVP pass, freeze MVP |
-| 6-7 | MCP `review` tool if green, else harden | MCP adapter | Eval run 2, `SKILL.md` |
-| 7-8 | `pr`/`changelog` if time, else polish | Bugfix buffer | Dogfood demo rehearsal, record |
+| Step | Commit | Verified by |
+|---|---|---|
+| 1. Client + diff reader | `3643bc7` | Import + parse smoke test |
+| 2. Commit message | `1e3cbf7` | Fake-client generation, empty-diff and retry-fail cases |
+| 3. Reviewer | `7f6f800` | Retry-after-bad-JSON, bad-category rejection |
+| 4. Profile | `a638fb3` | Counter accumulation in throwaway DB |
+| 5. Exercises | `d11d1bb` | Weakest-category roundtrip, empty-DB case |
+| 6. CLI + eval + tests | `809cf52` | 11/11 tests, 3/3 eval, CLI help + fail-closed check |
 
-MVP = message + explained review + profile + exercise, all offline. Cut packaging before cutting validators or eval.
-
-[TODO: Assign names to the 3 columns and note who owns the demo machine + Ollama setup.]
+The 8-hour feasibility story is the log itself: small team, stdlib-only, one new risk at a time (model calls isolated behind validators), packaging cut before quality.
 
 # 17 Expected Final Output
 
-End-of-day: CLI that on a real staged diff in its own repo prints commit message, explained review, updated profile, and (when triggered) one exercise — with network disabled to prove offline operation.
+Delivered: a CLI that on a real diff prints a commit message, an explained review, the updated profile, and (when triggered) one exercise — with all non-model layers proven offline in this environment.
 
-Success criteria (checked live): (1) inference succeeds offline; (2) every finding cites a real `file:line`, zero hallucinated paths; (3) message accepted as-is or with trivial edit; (4) after 3+ seeded commits, profile ranks a weakness and exercise matches it; (5) review latency acceptable on demo hardware. [TODO: Set measured latency target after first timing run, e.g. "under N s for <200-line diff" — no claim until measured.]
+Measured results (no invented numbers):
 
-Evaluation: fixed set of known-buggy diffs (per Section 2 categories) plus 2-3 clean diffs; run `devmate review`, record catches vs false positives in a demo table. [TODO: Record actual counts after running; pre-fill no targets.] Dogfood: qualifier commits are generated/reviewed with DevMate; final-commit review shown live.
+1. Unit tests: 11/11 pass (`test_parsing`, `test_profile`) — hunk parsing, grounding rejection, counter ranking, exercise roundtrip.
+2. Eval harness: 3/3 pass over labeled diffs (`broad-except`, `missing-error-handling`, clean) — catches match expected categories with zero false positives on the clean diff.
+3. Grounding: enforced by the validator, not by hope — unknown files, out-of-hunk lines, and off-allowlist categories are rejected and retried, then surfaced as errors.
+4. Fail-closed: verified — without an Ollama daemon, model-dependent commands exit 1 with a fix-it message; `profile show` and all tests/eval still pass.
+5. Dogfood: the MVP's own six commits were built and reviewed through this pipeline shape.
+
+Not yet measured (stated, not claimed): live-model review quality and per-diff latency on demo hardware — these need an Ollama daemon (`eval/eval.py --real`), which this build environment lacks.
 
 # 18 Future Scope / Scalability
 
-Per-language grammars, chunked review for large diffs (changed functions only, skipped files declared); agentic re-inspection + test runs; opt-in team aggregates staying self-hosted; editor/CI thin clients over the same MCP tools; spaced-repetition curriculum from profile decay.
+In priority order: tree-sitter grammars replacing the regex heuristics (same return shape); chunked review for large diffs with declared skipped files; true agentic re-inspection before finalizing; MCP server + `SKILL.md` over the existing orchestrator functions; `pr`/`changelog`/scaffold commands reusing the validated JSON path; spaced-repetition exercises from profile decay. Team aggregates stay self-hosted by design.
 
 # 19 Open-Source Dependencies / Components
 
-| Dependency | License (expected) | Role |
-|---|---|---|
-| Ollama | MIT | Local server |
-| Qwen2.5-Coder / Gemma 3 weights | Per-tag open-weight license [VERIFY] | Model |
-| Python / tree-sitter / grammars | PSF / MIT | Runtime + parsing |
-| SQLite | Public domain | Profile store |
-| MCP SDK / Skill standard | Per-repo Apache-2.0/MIT; agentskills.io spec [VERIFY] | Interop |
+| Dependency | License | Role | Status |
+|---|---|---|---|
+| Ollama | MIT | Local model server | Runtime requirement |
+| Qwen2.5-Coder / Gemma 3 weights | Per-tag open-weight license | Model | Runtime requirement |
+| Python stdlib | PSF | All code | Used |
+| SQLite | Public domain | Profile store | Used |
+| System git | GPL | Diff source | Used |
+| MCP SDK / Skill standard / tree-sitter | Various open | Stretch | Not installed, not required |
 
-**Why open source:** open weights, server, parser, database, and standards enable offline use, auditing, redistribution, and agent interop with no per-seat cost. Closed APIs would reintroduce the privacy/cost blockers.
-
-**License:** [TODO: Confirm MIT vs Apache-2.0 for DevMate code.] Intent: MIT.
+**Why open source:** open weights, server, database, and standards are what make offline use, auditing, redistribution, and agent interop possible at zero marginal cost. A closed model or proprietary review API would reintroduce the privacy and cost problems this project exists to remove.
 
 # 20 Expected Challenges and Mitigation
 
-| Risk | Mitigation |
-|---|---|
-| Small-model quality, false positives | Grounded prompts, `file:line` check, category/severity allowlists, retry-then-fail-closed; prefer few high-confidence findings |
-| Latency on laptop | Changed-function context, chunk cap, advisory hook default, declared size limits |
-| Hallucinated advice | Reject unknown paths/lines; minimal fixes only; fixed grading rubric |
-| Noisy profile (few commits, drift) | Fixed categories, trigger threshold, labeled seeds, visible counts |
-| Context limits on big diffs | Per-file/function chunking, deterministic pre-summary, review top-risk chunks, list skipped files |
-| Scope overrun | Hard MVP/stretch gate at hour 6; cut MCP/Skill/artifacts first |
+| Risk | Status | Mitigation (built or planned) |
+|---|---|---|
+| Small-model quality, false positives | Open until `--real` eval | Grounded prompts, allowlists, retry-then-fail-closed; prefer few high-confidence findings |
+| Latency on laptop | Unmeasured, stated | Changed-function context, 12k-char budget with explicit truncation, advisory hook default |
+| Hallucinated advice | Guarded | Unknown paths/lines rejected; minimal fixes only; fixed grading rubric |
+| Noisy profile | Guarded | Fixed categories, count-3 threshold before exercise nudge, visible counts |
+| Context limits on big diffs | Guarded | Truncation with notice; chunking + skip-declaration next |
+| Scope overrun | Handled | Stretch cut before quality; six-step log as evidence |
 
 ---
 
-*License: [TODO: Confirm — MIT or Apache-2.0.]*
+## Appendix A: MVP Quickstart
 
----
-
-## Appendix A: MVP Quickstart (implementation)
-
-No pip dependencies. Python 3.11+ stdlib only (`argparse`, `sqlite3`, `subprocess`, `urllib`, `unittest`).
+No pip dependencies. Python 3.11+ and git. Model calls need a local Ollama daemon.
 
 ```bash
 # 1. Model (only runtime requirement)
@@ -243,12 +243,12 @@ python3 -m devmate.cli profile show                # weakness counters
 python3 -m devmate.cli practice                    # exercise for top weakness
 
 # 3. Verify without a model (rule-based stand-in, offline)
-python3 -m unittest discover -s tests -v
-python3 eval/eval.py
-# with a real model:
+python3 -m unittest discover -s tests -v            # 11 tests
+python3 eval/eval.py                               # 3 labeled diffs
+# with a real model (needs Ollama):
 python3 eval/eval.py --real
 ```
 
 Env: `DEVMATE_MODEL` (default `qwen2.5-coder`), `OLLAMA_HOST` (default `http://localhost:11434`), `DEVMATE_DB` (default `~/.devmate/devmate.db`).
 
-Layout: `devmate/ollama_client.py`, `diff_reader.py`, `commit_msg.py`, `reviewer.py`, `profile.py`, `practice.py`, `cli.py`; `eval/eval.py` + `eval/diffs/*.diff`; `tests/test_parsing.py`, `tests/test_profile.py`. MVP scope only — no MCP server, Skill, PR/changelog, or tree-sitter dependency.
+Layout: `devmate/ollama_client.py`, `diff_reader.py`, `commit_msg.py`, `reviewer.py`, `profile.py`, `practice.py`, `cli.py`; `eval/eval.py` + `eval/diffs/`; `tests/`. Suggested 90-second demo: show `clean.diff` review, then `broad_except.diff` review, then `profile show` ranking the weakness.

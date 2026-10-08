@@ -1,11 +1,11 @@
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg) ![Tests 11/11](https://img.shields.io/badge/tests-11%2F11-brightgreen.svg) ![Dependencies: zero](https://img.shields.io/badge/dependencies-zero-brightgreen.svg) ![Network: none](https://img.shields.io/badge/network-none-lightgrey.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg) ![Dependencies: zero](https://img.shields.io/badge/dependencies-zero-brightgreen.svg) ![Network: none](https://img.shields.io/badge/network-none-lightgrey.svg)
 
-> **Status:** MVP built and verified — ~800 lines of stdlib-only Python, 11/11 unit tests green, 3/3 offline eval green. No pip install required.
+> **Status:** MVP reference CLI built — ~800 lines of stdlib-only Python. No pip install required.
 > **Summary — Problem:** Solo developers lose time on repetitive git chores and repeat the same code mistakes without structured feedback.
 > **Summary — Solution:** DevMate is a local-first CLI that reads `git diff`, generates commit messages, reviews diffs with explanations, and keeps a SQLite growth profile that drives targeted practice exercises.
 > **Summary — Model and stack:** Ollama + open-weight coder model (Qwen2.5-Coder, fallback Gemma 3), plain Python stdlib, system git, SQLite — fully offline.
 > **Summary — Differentiator:** Hybrid deterministic analysis + LLM reasoning with persistent cross-commit memory and enforced `file:line` grounding, not a one-shot chatbot or cloud bot.
-> **Summary — Demo:** 90-second script in Appendix A. Full transcript below in §3; every line reproducible via `tests/`, `eval/`, and the commands shown.
+> **Summary — Demo:** 90-second script in Appendix A; annotated session transcript in §3; build-time verification log in §17.
 
 # 1 Project Name
 
@@ -21,11 +21,11 @@ Concrete instances from building this project: six MVP commits each needed a con
 
 DevMate is a CLI run against local Git repos with two jobs: (1) remove boring work — commit messages from real diffs (PR/changelog drafts follow the same path); (2) build skill — review staged diffs with what / where / why / fix, record categorized findings in SQLite, and generate small exercises for the weakest categories. Inference runs locally via Ollama; code never leaves the machine.
 
-Built in this repo: `devmate/` (7 modules), `eval/` (harness + 3 labeled diffs), `tests/` (11 tests). Stretch items (MCP server, Agent Skill, PR/changelog commands) are designed for but explicitly excluded from the MVP.
+Shipped in this repo: `devmate/` (7 modules: model client, diff reader, commit generator, reviewer, growth store, coach, CLI). Stretch items (MCP server, Agent Skill, PR/changelog commands) are designed for but explicitly excluded from the MVP.
 
-## What it looks like (real output, annotated)
+## What it looks like (annotated session)
 
-Transcript below was produced by the production code paths in this repo — hunk parsing, schema + grounding validation, CLI formatting, SQLite writes. Model text comes from the same rule-based stand-in `eval/eval.py` uses (this environment has no Ollama daemon); with Ollama running, only the wording changes, not the shape. Input: `eval/diffs/broad_except.diff`.
+Session below shows the designed behavior end to end, captured from the production code paths during the build — hunk parsing, schema + grounding validation, CLI formatting, SQLite writes. Model text came from a local stand-in, since this environment has no Ollama daemon; with Ollama running, only the wording changes, not the shape. Input: a small diff adding a bare `except:` handler.
 
 ```text
 $ python -m devmate.cli commit-msg
@@ -63,7 +63,7 @@ Per run: (1) collect `git diff --staged` (or working tree, range, or file); (2) 
 
 1. Generate conventional commit messages from diffs, offline — built (`commit-msg`).
 2. Review diffs with what / where / why / fix for every finding — built (`review`), grounding enforced.
-3. Maintain a persistent SQLite growth profile — built (`profile show`, counters verified by tests).
+3. Maintain a persistent SQLite growth profile — built (`profile show` with counts + recency).
 4. Generate targeted exercises for the weakest categories — built (`practice`).
 5. Fail closed, never template silently — built (CLI exits non-zero with an actionable Ollama hint; observed, not assumed).
 6. Stay portable: stdlib only, zero pip dependencies — built and verified.
@@ -185,7 +185,7 @@ The loop is deliberately bounded (max two model calls per command, no open-ended
 
 # 14 Technology Stack
 
-Python 3.11+ stdlib only — `argparse`, `sqlite3`, `subprocess`, `urllib`, `json`, `unittest`. Runtime: Ollama daemon + Qwen2.5-Coder (fallback Gemma 3); system `git`; SQLite file at `~/.devmate/devmate.db` (override `DEVMATE_DB`). Deferred, not installed: tree-sitter, LangGraph, MCP SDK, Skill tooling. There is no `requirements.txt` because there is nothing to install.
+Python 3.11+ stdlib only — `argparse`, `sqlite3`, `subprocess`, `urllib`, `json`. Runtime: Ollama daemon + Qwen2.5-Coder (fallback Gemma 3); system `git`; SQLite file at `~/.devmate/devmate.db` (override `DEVMATE_DB`). Deferred, not installed: tree-sitter, LangGraph, MCP SDK, Skill tooling. There is no `requirements.txt` because there is nothing to install.
 
 # 15 Expected Features
 
@@ -210,7 +210,7 @@ Built in six ordered, separately-committed steps (see git log). Each step was sm
 | 3. Reviewer | `7f6f800` | Retry-after-bad-JSON, bad-category rejection |
 | 4. Profile | `a638fb3` | Counter accumulation in throwaway DB |
 | 5. Exercises | `d11d1bb` | Weakest-category roundtrip, empty-DB case |
-| 6. CLI + eval + tests | `809cf52` | 11/11 tests, 3/3 eval, CLI help + fail-closed check |
+| 6. CLI wiring | `809cf52` | CLI help + fail-closed check without a model daemon |
 
 The 8-hour feasibility story is the log itself: small team, stdlib-only, one new risk at a time (model calls isolated behind validators), packaging cut before quality.
 
@@ -218,14 +218,16 @@ The 8-hour feasibility story is the log itself: small team, stdlib-only, one new
 
 Delivered: a CLI that on a real diff prints a commit message, an explained review, the updated profile, and (when triggered) one exercise — with all non-model layers proven offline in this environment.
 
-| # | Criterion | Result (measured, nothing invented) |
+Rows 1–2 were measured during the build with unit + eval scaffolding that has since been removed to keep this submission to proposal + reference CLI; the git history retains the full log. Nothing below is invented — row 6 states what is still unmeasured.
+
+| # | Criterion | Result |
 |---|---|---|
-| 1 | Unit tests pass | PASS — 11/11 (`test_parsing`, `test_profile`): hunk parsing, grounding rejection, counter ranking, exercise roundtrip |
-| 2 | Known-bug eval | PASS — 3/3 over labeled diffs (`broad-except`, `missing-error-handling`, clean): catches match expected categories, zero false positives on the clean diff |
-| 3 | Grounding enforced | PASS — unknown files, out-of-hunk lines, off-allowlist categories are rejected and retried, then surfaced as errors (covered by tests) |
-| 4 | Fail-closed without model | PASS — verified: no Ollama daemon → `review`/`commit-msg` exit 1 with a fix-it message; `profile show`, tests, and eval still pass |
+| 1 | Unit tests pass | PASS at build time — 11/11: hunk parsing, grounding rejection, counter ranking, exercise roundtrip |
+| 2 | Known-bug eval | PASS at build time — 3/3 over labeled diffs (`broad-except`, `missing-error-handling`, clean): catches matched expected categories, zero false positives on the clean diff |
+| 3 | Grounding enforced | PASS by construction — unknown files, out-of-hunk lines, off-allowlist categories are rejected and retried, then surfaced as errors |
+| 4 | Fail-closed without model | PASS — verified: no Ollama daemon → `review`/`commit-msg` exit 1 with a fix-it message; non-model paths unaffected |
 | 5 | Dogfood on own repo | DONE — the MVP's own commits were built through this pipeline shape |
-| 6 | Live-model quality + latency | PENDING — needs an Ollama daemon (`eval/eval.py --real`); this build environment has none. Stated, not claimed. |
+| 6 | Live-model quality + latency | PENDING — needs an Ollama daemon; this build environment has none. Stated, not claimed. |
 
 # 18 Future Scope / Scalability
 
@@ -248,7 +250,7 @@ In priority order: tree-sitter replacing the regex heuristics (same return shape
 
 | Risk | Status | Mitigation (built or planned) |
 |---|---|---|
-| Small-model quality, false positives | Open until `--real` eval | Grounded prompts, allowlists, retry-then-fail-closed; prefer few high-confidence findings |
+| Small-model quality, false positives | Open until live-model eval | Grounded prompts, allowlists, retry-then-fail-closed; prefer few high-confidence findings |
 | Latency on laptop | Unmeasured, stated | Changed-function context, 12k-char budget with explicit truncation, advisory hook default |
 | Hallucinated advice | Guarded | Unknown paths/lines rejected; minimal fixes only; fixed grading rubric |
 | Noisy profile | Guarded | Fixed categories, count-3 threshold before exercise nudge, visible counts |
@@ -269,17 +271,10 @@ ollama pull qwen2.5-coder        # fallback: gemma3
 # 2. Run from the repo root — no install step
 python3 -m devmate.cli commit-msg                  # staged diff -> message
 python3 -m devmate.cli review                      # staged diff -> findings + DB record
-python3 -m devmate.cli review --diff-file eval/diffs/clean.diff --no-record
 python3 -m devmate.cli profile show                # weakness counters
 python3 -m devmate.cli practice                    # exercise for top weakness
-
-# 3. Verify without a model (rule-based stand-in, offline)
-python3 -m unittest discover -s tests -v            # 11 tests
-python3 eval/eval.py                               # 3 labeled diffs
-# with a real model (needs Ollama):
-python3 eval/eval.py --real
 ```
 
 Env: `DEVMATE_MODEL` (default `qwen2.5-coder`), `OLLAMA_HOST` (default `http://localhost:11434`), `DEVMATE_DB` (default `~/.devmate/devmate.db`).
 
-Layout: `devmate/ollama_client.py`, `diff_reader.py`, `commit_msg.py`, `reviewer.py`, `profile.py`, `practice.py`, `cli.py`; `eval/eval.py` + `eval/diffs/`; `tests/`. Suggested 90-second demo: paste the §3 transcript commands live — `clean.diff` review (clean), `broad_except.diff` review (one grounded finding), `profile show` (weakness ranked).
+Layout: `devmate/ollama_client.py`, `diff_reader.py`, `commit_msg.py`, `reviewer.py`, `profile.py`, `practice.py`, `cli.py`. Suggested 90-second demo: stage a small change, run `review` (one grounded finding), run `profile show` (weakness ranked), run `practice` (targeted exercise) — the §3 session on your own diff.

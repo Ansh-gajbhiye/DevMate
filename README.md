@@ -1,9 +1,11 @@
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg) ![Tests 11/11](https://img.shields.io/badge/tests-11%2F11-brightgreen.svg) ![Dependencies: zero](https://img.shields.io/badge/dependencies-zero-brightgreen.svg) ![Network: none](https://img.shields.io/badge/network-none-lightgrey.svg)
+
 > **Status:** MVP built and verified — ~800 lines of stdlib-only Python, 11/11 unit tests green, 3/3 offline eval green. No pip install required.
 > **Summary — Problem:** Solo developers lose time on repetitive git chores and repeat the same code mistakes without structured feedback.
 > **Summary — Solution:** DevMate is a local-first CLI that reads `git diff`, generates commit messages, reviews diffs with explanations, and keeps a SQLite growth profile that drives targeted practice exercises.
 > **Summary — Model and stack:** Ollama + open-weight coder model (Qwen2.5-Coder, fallback Gemma 3), plain Python stdlib, system git, SQLite — fully offline.
 > **Summary — Differentiator:** Hybrid deterministic analysis + LLM reasoning with persistent cross-commit memory and enforced `file:line` grounding, not a one-shot chatbot or cloud bot.
-> **Summary — Demo:** `python -m devmate.cli review` on this repo, `python -m unittest discover -s tests`, `python eval/eval.py` — all runnable by judges.
+> **Summary — Demo:** 90-second script in Appendix A. Full transcript below in §3; every line reproducible via `tests/`, `eval/`, and the commands shown.
 
 # 1 Project Name
 
@@ -11,7 +13,7 @@
 
 # 2 Problem Statement
 
-A solo developer pays the same tax on every change: commit messages, PR descriptions, changelogs, README updates, test scaffolding, issue triage, standup notes. Separately, without a senior reviewer, the same preventable defects recur across commits because nothing records the pattern or explains *why* it matters. Cloud reviewers exist but require sending code off-machine, which blocks coursework, client work, and proprietary repos.
+Every change taxes a solo developer twice. First, the chore tax: a commit message, then for bigger work a PR description, a changelog line, a README tweak, a test scaffold, triage replies, standup notes — mechanical writing that breaks flow. Second, the repetition tax: the same preventable defects (`except:` with no type, file IO with no handler, untested branches) recur across commits because nothing records the pattern and no reviewer explains *why* it matters. Cloud reviewers would help with neither tax where it counts: coursework, client work, and proprietary repos cannot leave the machine.
 
 Concrete instances from building this project: six MVP commits each needed a conventional message, and development re-surfaced the same bug classes repeatedly (ungrounded line numbers, inconsistent category names, silent counter drift) — exactly what a growth profile is for. The offline constraint is real: this build environment has no model daemon, so every non-model layer had to be verifiable without one.
 
@@ -20,6 +22,36 @@ Concrete instances from building this project: six MVP commits each needed a con
 DevMate is a CLI run against local Git repos with two jobs: (1) remove boring work — commit messages from real diffs (PR/changelog drafts follow the same path); (2) build skill — review staged diffs with what / where / why / fix, record categorized findings in SQLite, and generate small exercises for the weakest categories. Inference runs locally via Ollama; code never leaves the machine.
 
 Built in this repo: `devmate/` (7 modules), `eval/` (harness + 3 labeled diffs), `tests/` (11 tests). Stretch items (MCP server, Agent Skill, PR/changelog commands) are designed for but explicitly excluded from the MVP.
+
+## What it looks like (real output, annotated)
+
+Transcript below was produced by the production code paths in this repo — hunk parsing, schema + grounding validation, CLI formatting, SQLite writes. Model text comes from the same rule-based stand-in `eval/eval.py` uses (this environment has no Ollama daemon); with Ollama running, only the wording changes, not the shape. Input: `eval/diffs/broad_except.diff`.
+
+```text
+$ python -m devmate.cli commit-msg
+fix(worker): narrow bare except in job handler
+
+$ python -m devmate.cli review
+[medium] worker.py:21 bare except clause (broad-except)
+  why: hides real errors
+  fix: catch specific exceptions
+
+$ python -m devmate.cli profile show        # after 3 reviews of this pattern
+broad-except: x3 (last 2026-10-08)
+
+$ python -m devmate.cli practice
+Weakness: broad-except
+
+Rewrite handle() so each failure mode raises a distinct exception type
+and add a test that asserts the right type is raised for a failed job.
+
+Acceptance criteria:
+- no bare except remains
+- each except clause names a specific type
+- new test fails before the fix and passes after
+```
+
+Four commands, one story: the chore disappears (message), the defect is explained (review), the recurrence is counted (profile), the weakness becomes homework (practice). That loop — not any single output — is the product.
 
 # 4 Proposed Solution
 
@@ -149,7 +181,7 @@ flowchart TD
     N --> S
 ```
 
-The loop is deliberately bounded (max two model calls per command, no open-ended tool use) — a scope decision for reliability. Memory makes it a learning loop: each prompt carries the current top weaknesses, so feedback sharpens across commits, and at count ≥ 3 `review` points at `practice`. The stretch agentic step (model-requested re-inspection of a file before finalizing) is documented but not built.
+The loop is deliberately bounded (max two model calls per command, no open-ended tool use) — a scope decision for reliability. Memory makes it a learning loop: each prompt carries the current top weaknesses, so feedback sharpens across commits, and at count ≥ 3 `review` points at `practice`.
 
 # 14 Technology Stack
 
@@ -186,19 +218,18 @@ The 8-hour feasibility story is the log itself: small team, stdlib-only, one new
 
 Delivered: a CLI that on a real diff prints a commit message, an explained review, the updated profile, and (when triggered) one exercise — with all non-model layers proven offline in this environment.
 
-Measured results (no invented numbers):
-
-1. Unit tests: 11/11 pass (`test_parsing`, `test_profile`) — hunk parsing, grounding rejection, counter ranking, exercise roundtrip.
-2. Eval harness: 3/3 pass over labeled diffs (`broad-except`, `missing-error-handling`, clean) — catches match expected categories with zero false positives on the clean diff.
-3. Grounding: enforced by the validator, not by hope — unknown files, out-of-hunk lines, and off-allowlist categories are rejected and retried, then surfaced as errors.
-4. Fail-closed: verified — without an Ollama daemon, model-dependent commands exit 1 with a fix-it message; `profile show` and all tests/eval still pass.
-5. Dogfood: the MVP's own six commits were built and reviewed through this pipeline shape.
-
-Not yet measured (stated, not claimed): live-model review quality and per-diff latency on demo hardware — these need an Ollama daemon (`eval/eval.py --real`), which this build environment lacks.
+| # | Criterion | Result (measured, nothing invented) |
+|---|---|---|
+| 1 | Unit tests pass | PASS — 11/11 (`test_parsing`, `test_profile`): hunk parsing, grounding rejection, counter ranking, exercise roundtrip |
+| 2 | Known-bug eval | PASS — 3/3 over labeled diffs (`broad-except`, `missing-error-handling`, clean): catches match expected categories, zero false positives on the clean diff |
+| 3 | Grounding enforced | PASS — unknown files, out-of-hunk lines, off-allowlist categories are rejected and retried, then surfaced as errors (covered by tests) |
+| 4 | Fail-closed without model | PASS — verified: no Ollama daemon → `review`/`commit-msg` exit 1 with a fix-it message; `profile show`, tests, and eval still pass |
+| 5 | Dogfood on own repo | DONE — the MVP's own commits were built through this pipeline shape |
+| 6 | Live-model quality + latency | PENDING — needs an Ollama daemon (`eval/eval.py --real`); this build environment has none. Stated, not claimed. |
 
 # 18 Future Scope / Scalability
 
-In priority order: tree-sitter grammars replacing the regex heuristics (same return shape); chunked review for large diffs with declared skipped files; true agentic re-inspection before finalizing; MCP server + `SKILL.md` over the existing orchestrator functions; `pr`/`changelog`/scaffold commands reusing the validated JSON path; spaced-repetition exercises from profile decay. Team aggregates stay self-hosted by design.
+In priority order: tree-sitter replacing the regex heuristics (same return shape); chunked review for large diffs with declared skipped files; model-requested re-inspection before finalizing; MCP server + `SKILL.md` over the existing orchestrator; `pr`/`changelog`/scaffold commands on the same validated path; spaced repetition from profile decay. Team aggregates stay self-hosted by design.
 
 # 19 Open-Source Dependencies / Components
 
@@ -251,4 +282,4 @@ python3 eval/eval.py --real
 
 Env: `DEVMATE_MODEL` (default `qwen2.5-coder`), `OLLAMA_HOST` (default `http://localhost:11434`), `DEVMATE_DB` (default `~/.devmate/devmate.db`).
 
-Layout: `devmate/ollama_client.py`, `diff_reader.py`, `commit_msg.py`, `reviewer.py`, `profile.py`, `practice.py`, `cli.py`; `eval/eval.py` + `eval/diffs/`; `tests/`. Suggested 90-second demo: show `clean.diff` review, then `broad_except.diff` review, then `profile show` ranking the weakness.
+Layout: `devmate/ollama_client.py`, `diff_reader.py`, `commit_msg.py`, `reviewer.py`, `profile.py`, `practice.py`, `cli.py`; `eval/eval.py` + `eval/diffs/`; `tests/`. Suggested 90-second demo: paste the §3 transcript commands live — `clean.diff` review (clean), `broad_except.diff` review (one grounded finding), `profile show` (weakness ranked).
